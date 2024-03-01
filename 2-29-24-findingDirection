@@ -8,11 +8,16 @@ class autoBot{
     double positionZ = position[2];
     double yaw = position[5];
 
+ //final position X and Y are desired botpose coordinates
     double finalPositionX=0;
     double finalPositionY=0;
     double yawDisplacement;
     double finalYaw=0;
+
+//allows initial yaw, y, and x cooordinate to be unchanged
     final double startYaw = yaw;
+    final double startY = positionY;
+    final double startX = positionX;
   //Automatically initiates the aprilTag IDs to the ones present on our side of the field(Red or Blue)
   if(teamsplatoon == 'r'|| teamsplatoon == 'R'){
     midSpeakerID = 4;
@@ -40,7 +45,8 @@ class autoBot{
     finalPositionX = 8;
     finalPositionY = 8;
  }
- yawDisplacement = Math.toDegrees(Math.atan((finalPositionY-positionY)/(finalPositionX-positionX)));
+//finds the direction the robot wants to face and turns the robot in that direction
+ yawDisplacement = Math.toDegrees(Math.atan((finalPositionY-startY)/(finalPositionX-startX)));
     if(finalPositionY<0){
 finalYaw = startYaw + yawDisplacement;
     }else if(finalPositionY>0){
