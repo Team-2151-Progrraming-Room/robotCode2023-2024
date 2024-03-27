@@ -1,0 +1,23 @@
+if(finalYaw<0){
+  if(yaw<0 && yaw<finalYaw-10 || yaw>0){
+    m_frontLeft.set(-0.2);
+    m_frontRight.set(0.2);
+  }else{
+    m_frontLeft(0.2);
+    m_frontRight(-0.2);
+  } else if(yaw>finalYaw-10 && yaw<finalYaw+10){
+     m_frontLeft(0);
+    m_frontRight(0);
+  }
+}else if(finalYaw>0){
+  if(yaw>0 && yaw>finalYaw+10 || yaw<0){
+    m_frontLeft(0.2);
+    m_frontRight(-0.2);
+} else{
+    m_frontLeft(-0.2);
+    m_frontRight(0.2);
+  } else if(yaw>finalYaw-10 && yaw<finalYaw+10){
+     m_frontLeft(0);
+    m_frontRight(0);
+  }
+}
