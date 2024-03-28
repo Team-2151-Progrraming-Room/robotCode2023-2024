@@ -1,0 +1,1198 @@
+package frc.robot;
+
+import edu.wpi.first.wpilibj.TimedRobot;
+import edu.wpi.first.wpilibj.Joystick;
+import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.wpilibj.drive.DifferentialDrive;
+//import edu.wpi.first.wpilibj.motorcontrol.PWMMotorController;
+//import edu.wpi.first.wpilibj.motorcontrol.MotorController;
+//import edu.wpi.first.wpilibj.motorcontrol.MotorControllerGroup;
+import edu.wpi.first.wpilibj.motorcontrol.PWMSparkMax;
+import edu.wpi.first.wpilibj.motorcontrol.PWMVictorSPX;
+//import com.revrobotics.CANSparkMax;
+//import com.revrobotics.CANSparkLowLevel.MotorType;
+
+import edu.wpi.first.wpilibj.AnalogInput;
+import edu.wpi.first.wpilibj.RobotController;
+//import edu.wpi.first.wpilibj.AnalogPotentiometer;
+//import edu.wpi.first.wpilibj.I2C;
+//import edu.wpi.first.wpilibj.Servo;
+//import java.time.Clock;
+import java.util.Optional;
+
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.Preferences;
+
+import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableEntry;
+import edu.wpi.first.networktables.NetworkTableInstance;
+//import edu.wpi.first.units.Time;
+import edu.wpi.first.cameraserver.*;
+
+//import edu.wpi.first.wpilibj.util.Color;
+//import frc.robot.Robot.yValue;
+//import frc.robot.Robot.zValue;
+import edu.wpi.first.wpilibj.DriverStation.*;
+import edu.wpi.first.wpilibj.DigitalInput;
+import edu.wpi.first.wpilibj.DriverStation;
+
+public class Robot extends TimedRobot {
+
+  private static final String kDefaultAuto = "Default"; // SmartDashboard modes (autonomous objects)
+  private static final String kCustomAuto = "My Auto";
+  private static final String doNothing = "nothingModu7e";
+  private static final String NXZMode = "NXZMode";
+  private String m_autoSelected; //String that holds the current selected mode
+  private final SendableChooser<String> m_chooser = new SendableChooser<>();//Object that chooses between modes
+
+  //declaring integers (PWM ports) for motor controllers
+  private static final int frontLeftWheel = 8;   // setting up wheel motors to their PWM ports on the RobotRIO
+  private static final int backLeftWheel = 9;
+  private static final int frontRightWheel = 1;
+  private static final int backRightWheel = 0;
+ 
+  //intake ports (PMW)
+  private static final int intake1 = 2;
+  
+
+  //Climber (PMW)
+  private static final int winchArm1 = 5;
+
+  //Shooter (PMW)
+  private static final int shooter1port = 6;
+  private static final int shooter2port = 3;
+
+ /* Reverted the shooter  motors to being PMW
+  //Shooter motors (CANbus motors, these variables represent IDs.)
+  //Use the REV Hardware client to set the ID numbers and to update the controllers
+  //with most recent firmware.
+  private static final int shooter1ID = 1;
+  private static final int shooter2ID = 2;
+  */
+
+  //Servos (PMW)
+  //Servo servo1 = new Servo(9);
+  //Servo servo2 = new Servo(10);
+
+  /*//declaring integers (DIO ports) for sensors 
+  private static final int HALT = 0;
+  private static final int CEASE = 1;
+  */
+
+  //Ultrasonic Sensor 
+  private static final int UsonPort = 0; //ultrasonic analog port (aka Analog In on the RobotRIO)
+  public AnalogInput ultraSensor = new AnalogInput(UsonPort);//The sensor
+  public double voltageConverter = (5/RobotController.getVoltage5V())* 0.0492; //Factor used to convert voltage to distance in inches
+  //Use *.0125 for cm.
+  public double minDistance;//Mininum distance before stopping/reversing the robot
+  public double ultraDistance;//Current distance that the ultrasonic sensor detects
+
+
+
+  /*This seems to be a really risky way to code ultrasonic sensors. From some little investigation,
+  it seems like using the Roborio's I2C port can lead to SYSTEM LOCKOUTS! The frequecy of these lockouts depends on
+  different factors, and there doesn't seem to be workarounds avaliable to us. I'll research this and discuss this more later.
+  Seems best to just use Analog inputs for the ultrasonic sensor.*/
+
+  //private final I2C.Port i2cPort = I2C.Port.kOnboard;
+
+  private static final int gamer = 0; //sets up joystick to connect to usb port 1 on the laptop/computer
+
+
+  //Drivetrain object and joystick
+  private DifferentialDrive mecaTibbs; //gives the drive train a name
+  private Joystick gStick;  //gives the joystick a name
+
+
+  //Left Motor controllers
+  final PWMVictorSPX m_frontLeft = new PWMVictorSPX(frontLeftWheel);//
+  final PWMVictorSPX m_backLeft = new PWMVictorSPX(backLeftWheel);//
+  
+  //Right Motor controllers
+  final PWMVictorSPX m_frontRight = new PWMVictorSPX(frontRightWheel);//
+  final PWMVictorSPX m_backRight = new PWMVictorSPX(backRightWheel);//
+  //Intake Motor controllers
+  PWMSparkMax m_intake = new PWMSparkMax(intake1);
+  
+  PWMSparkMax m_shooter1 = new PWMSparkMax(shooter1port);
+  PWMSparkMax m_shooter2 = new PWMSparkMax(shooter2port);
+  /* 
+  // The shooter Moter controllers.
+  CANSparkMax m_shooter1 = new CANSparkMax(shooter1ID, MotorType.kBrushless);//Figure out Device ID and type.
+  CANSparkMax m_shooter2 = new CANSparkMax(shooter2ID, MotorType.kBrushless);
+  */
+
+  //The motor controller for the climber
+  PWMSparkMax m_winchArm1 = new PWMSparkMax(winchArm1);
+
+  //Automatically gets what alliance we are on.
+  Optional<Alliance> teamAlliance = DriverStation.getAlliance();
+
+
+  /*Digital input sensors, ignore names
+  DigitalInput DomGoth = new DigitalInput(HALT);
+  DigitalInput SubFemboy= new DigitalInput(CEASE);
+  */
+  
+  //Limelight variables
+  NetworkTable table = NetworkTableInstance.getDefault().getTable("limelight");
+  double limelightMountAngleDegrees = 0; 
+  double limelightLensHeightInches = 22; 
+
+  //Variable and objects for autonomous
+  private double autoDelay;
+  private double time;
+  private double startTime;
+
+
+  autoBot autonomousBot;
+  //autoStop autonomousStop;
+
+  //Apriltag IDS and heights
+  public double ID; //ID currently being tracked
+
+  //Self explanatory declarations and initializations.
+  public int midSpeakerID;
+  public int sideSpeakerID;
+  public double speakerTagHeight = 57.13; //Top at 60.38 +- 1 in
+  
+  public int centerStageID;
+  public int leftStageID;
+  public int rightStageID;
+  public double stageHeight = 48.81;//Top at 55.31 +- 1 in
+
+  public int ampID;
+  public double ampHeight = 50.13;// Top at 56.63 +- 1 in
+
+  public int leftSourceID;
+  public int rightSourceID;
+  public double sourceHeight = 48.5;// Top at 55(?) in 
+
+ 
+  //Network table entries from limelight
+  private NetworkTableEntry tx;
+  private NetworkTableEntry ty;
+  //private NetworkTableEntry ta;
+  public NetworkTableEntry tid;
+  
+  //Limelight apriltag camera image variables
+  private double limex;//where the apriltag is x wise on the camera image.
+  private double limey;//where the apriltag is y wise on the camera image.
+  //private double limearea;//how much of the camera image the apritag takes up.
+
+  //Botpose variables
+  double[] position;
+  private double positionX;
+  private double positionY;
+  //private double positionZ;
+  private double Yaw;
+
+  //Limelight Distance calculation variables
+  private double targetOffsetAngle_Vertical;
+  private double angleToGoalDegrees;
+  private double angleToGoalRadians;
+
+  public double distanceFromLimelightToGoalInches;
+
+  /**
+   * This function is run when the robot is first started up and should be
+   * used for any initialization code.
+   */
+  @Override
+  public void robotInit() {
+    m_chooser.setDefaultOption("moveThanStop", kDefaultAuto); //Creates options for the dashboard
+    m_chooser.addOption("fullAuto", kCustomAuto);
+    m_chooser.addOption("ultraSensorTest", doNothing);
+    m_chooser.addOption("NXZmode", NXZMode);
+    SmartDashboard.putData("Auto choices", m_chooser);//Uploads the options to the dashboard
+    
+    CameraServer.startAutomaticCapture().setResolution(240,180);//USB camera
+
+    //WheelMotor Controller followers 
+    m_frontLeft.addFollower(m_backLeft);
+    m_frontRight.addFollower(m_backRight);
+
+  
+  
+    
+
+    //Wheel motor invert methods
+    m_frontRight.setInverted(true);
+    m_backRight.setInverted(false);
+    m_frontLeft.setInverted(false);
+    m_backLeft.setInverted(false);
+ 
+    //Drivetrain and Joystick
+    mecaTibbs = new DifferentialDrive(m_frontLeft , m_frontRight); //hooks up the drive train with the PWM motors that are linked to the wheels                          
+    mecaTibbs.setExpiration(0.1);//For safety
+
+    gStick = new Joystick(gamer); //hooks up joysick to the usb port that is connected to the joystick
+    
+    autonomousBot = new autoBot();
+
+  }
+
+  @Override
+  public void robotPeriodic(){
+    mecaTibbs.setSafetyEnabled(true);//Sets safety for all drivetrain motors
+    
+    //Network table entries from limelight
+    tx = table.getEntry("tx");
+    ty = table.getEntry("ty");
+   // ta = table.getEntry("ta");
+    tid = table.getEntry("tid");
+  
+    //Variables from tables from limelight
+    limex = tx.getDouble(0.0);
+    limey = ty.getDouble(0.0);
+    //limearea = ta.getDouble(0.0);
+    ID = tid.getDouble(0.0);
+    
+
+    //Code that gives the direction the limelight is facing
+    position = NetworkTableInstance.getDefault().getTable("limelight").getEntry("botpose_wpiblue").getDoubleArray(new double[6]);
+    
+
+    positionX = position[0]; //Current X,Y,Z values of the limelight on the field.
+    positionY = position[1];
+    //positionZ = position[2];
+    Yaw = position[5];//should give direction the limelight is pointing
+
+  
+    //Distance calculation below
+    targetOffsetAngle_Vertical = ty.getDouble(0.0);
+    angleToGoalDegrees = limelightMountAngleDegrees + targetOffsetAngle_Vertical;
+    angleToGoalRadians = angleToGoalDegrees * (3.14159 / 180.0);
+    
+    //Distance variable
+    distanceFromLimelightToGoalInches = (speakerTagHeight - limelightLensHeightInches) / Math.tan(angleToGoalRadians)/39.37;
+
+    //Prevents inf distance value
+    if(ID == -1){
+      distanceFromLimelightToGoalInches =0;
+    }
+
+    //Converts the voltage from the Ultrasonic sensor into inches (change units by modifying voltageConverter)
+    ultraDistance = ultraSensor.getValue() * voltageConverter;
+   
+
+    //Periodic SmartDashboard Uploads and retrieves
+
+    //SmartDashboard.putNumber("LimelightX", limex);
+    //SmartDashboard.putNumber("LimelightY", limey);
+    //SmartDashboard.putNumber("LimelightArea", limearea);
+    SmartDashboard.putNumber("aprilTagDistance(in)",distanceFromLimelightToGoalInches);
+    // SmartDashboard.putNumber("TOSA", targetOffsetAngle_Vertical);
+    // SmartDashboard.putNumber("ATGDegrees", angleToGoalDegrees);
+    // SmartDashboard.putNumber("ATGRadians", angleToGoalRadians);
+    SmartDashboard.putNumber("AprilTagID", ID);
+
+    SmartDashboard.putNumber("botPoseX", positionX);
+    SmartDashboard.putNumber("botPoseY", positionY);
+    //SmartDashboard.putNumber("botPoseZ", positionZ);
+    SmartDashboard.putNumber("botPoseYaw", Yaw);
+    SmartDashboard.putNumber("ultraDistance(in)", ultraDistance);
+    
+
+   
+    autoDelay = Preferences.getDouble("Delay",0);
+    minDistance = Preferences.getDouble("uS min distance(in)", 24);
+
+    //SmartDashboard.putNumber("testDelay", autoDelay);
+    //SmartDashboard.putNumber("testMinDistance", minDistance);
+    
+
+    //boolean keyExist = Preferences.containsKey("Delay");  key test
+    //SmartDashboard.putBoolean("keyExist", keyExist);
+
+
+  }
+
+
+  @Override
+  public void autonomousInit() {
+    startTime = Timer.getFPGATimestamp();
+ 
+    m_autoSelected = m_chooser.getSelected();
+    
+
+   
+  }
+
+  
+   /*
+   * This function is called periodically during autonomous.
+   */
+  @Override
+  public void autonomousPeriodic() {
+    //SmartDashboard.putString("currentAutonomous", m_autoSelected);
+    //if(ultraDistance>minDistance){
+      time = Timer.getFPGATimestamp();
+    //} 
+    // Causes the time to be paused while something is in ultrasonic sensor range
+    //Gets set back to the current match time value once that thing had left the range
+
+  
+    switch (m_autoSelected) {
+     case kDefaultAuto:
+
+      autonomousBot.basicMode(autoDelay, time, position[0], position[1], position[5]);
+
+     break;
+        
+     case kCustomAuto:
+       
+    autonomousBot.speakerMode(autoDelay, time, position[0], position[1], position[5]);
+      
+    break;
+
+    case doNothing:
+       
+    autonomousBot.doNothing(autoDelay, time, position[0], position[1], position[5]);
+      
+    break;
+
+    case NXZMode:
+
+    autonomousBot.NXZ(autoDelay, time, position[0], position[1], position[5]);
+
+    break;
+  }
+}
+  
+
+
+
+  // This function is called periodically during operator control.
+
+  @Override
+  public void teleopPeriodic() {
+    //xValue xylophone = new xValue(gStick.getX());
+    yValue yylophone = new yValue(gStick.getY());
+    zValue zylophone = new zValue(gStick.getZ());
+    //wValue wylophone = new wValue(gStick.getRawAxis(3));
+    //Fricker Shaquille = new Fricker(gStick.getThrottle());
+  
+    
+    
+
+    mecaTibbs.arcadeDrive(yylophone.yJoy(), zylophone.zJoy(),true); //sets driving to run using joystick controls
+                                                                                 
+                                                                                                                                    
+    //distance check
+    /* 
+    if(gStick.getRawButton(1) == true){
+    System.out.println(distanceFromLimelightToGoalInches);
+    }
+    */
+
+    //Intake 
+    if(gStick.getRawButton(1)==true){//Sucking in
+      m_intake.set(-.6);//Good speed for now
+    } else if(gStick.getRawButton(2)){//Ejecting
+      m_intake.set(.6);//Good speed for now
+    } else{
+      m_intake.set(0);
+    }
+
+    //Shooter 1
+    if(gStick.getRawButton(5) == true){//Shooter 1 goes forward
+      m_shooter1.set(0.1);//Unknown placeholder speed
+    } else {
+      m_shooter1.set(0);
+    }
+
+    //Shooter 2
+    if(gStick.getRawButton(3) == true){//Shooter 2 goes forward
+      m_shooter2.set(0.1);//Unknown placeholder speed
+    } else {
+      m_shooter2.set(0);
+    }
+    //Climber
+    if(gStick.getRawButton(6) == true){//Climber extends
+      m_winchArm1.set(0.1);//Good speed for now
+    } else if(gStick.getRawButton(4)==true) {//Climber retracts
+      m_winchArm1.set(-.15);//Good speed for now
+    }
+    
+    /* 
+    //Test for indiviual sides of the drive train
+    if(gStick.getRawButton(12)==true) {
+      m_frontRight.set(0.4);
+    } else{
+      m_frontRight.set(0);
+    }
+    if(gStick.getRawButton(11)==true){
+      m_frontLeft.set(0.4);
+    } else{
+      m_frontLeft.set(0);
+    }
+    */
+
+
+
+     /*  Investigate what kind of code this is later.
+     
+     try{
+        Thread.sleep(500);
+      }
+      catch (InterruptedException ex){
+        Thread.currentThread().interrupted();
+      }
+      hammerTime.set(-0.5);
+      try{
+        Thread.sleep(500);
+      }
+      catch (InterruptedException ex){
+        Thread.currentThread().interrupted();
+        hammerTime.set(0);
+    } */
+   /*  if (DomGoth.get()==false){
+      output = Math.min(output, 0);
+    }
+    else if (SubFemboy.get()==false){
+      output = Math.max(output, 0);}
+    }
+    MeganTheeStallion.set((-output));
+    DojaCat.set(output/2);
+*/
+
+
+
+
+   Timer.delay(0.001);
+   //timer sets up the code to have a 1 millisecond delay to avoid overworking and 
+   //over heating the RobotRIO
+ }  
+
+
+
+
+
+
+
+
+/* 
+  @Override
+  public void testPeriodic() {
+  }
+
+  @Override
+  public void simulationInit(){
+
+  }
+
+  @Override
+  public void simulationPeriodic() {
+  
+  }
+
+*/
+
+
+
+
+
+class autoBot {
+
+  public autoBot() {
+
+  //Automatically initiates the aprilTag IDs to the ones present on our side of the field(Red or Blue)
+  if(teamAlliance.get() == Alliance.Red) {
+    midSpeakerID = 4;
+    sideSpeakerID = 3;
+    centerStageID = 13;
+    leftStageID = 11;
+    rightStageID = 12;
+    leftSourceID = 2;
+    rightSourceID = 1;
+    ampID = 5;
+
+    //Zone in front of the red speaker where we want to head to (placeholder values)
+    finalPositionX = 14.8;   //X line closest to the speaker.
+    finalPositionX2=13.89;        //X line farther from the speaker.
+    finalPositionXCenter=14.35; 
+  
+    finalPositionY = 5.6;//Y line to the right side of the speaker(relative to the front);
+    finalPositionY2 = 5.97;//Y line to the left side of the speaker (relative to the front);
+    finalPositionYCenter = 5.8;
+
+
+
+  }else if(teamAlliance.get() == Alliance.Blue)  { // gets the blue team and sets the Id
+    midSpeakerID = 7;
+    sideSpeakerID = 8;
+    centerStageID = 14;
+    leftStageID = 15;
+    rightStageID = 16;
+    leftSourceID = 10;
+    rightSourceID = 9;
+    ampID = 6;
+
+    
+    //Zone in front of the  blue speaker where we want to head to.
+    finalPositionX=0.72;//Value should be 0.72  //X line closest to the speaker
+    finalPositionX2=1.175;//Old value was 1.63   //X line farther from the speaker.
+    finalPositionXCenter=0.9475;//Old value was 1.18 
+
+    finalPositionY=5.6;//Y line to the left side of the speaker(relative to the front)
+    finalPositionY2=5.97;//Y line to the right side of the speaker(relative to the front)
+    finalPositionYCenter=5.8;
+
+  }
+ 
+  SmartDashboard.putNumber("midSpeaker", midSpeakerID);
+  SmartDashboard.putNumber("sideSpeaker", sideSpeakerID);
+  SmartDashboard.putNumber("centerStage", centerStageID);
+  SmartDashboard.putNumber("leftStage", leftStageID);
+  SmartDashboard.putNumber("rightStage", rightStageID);
+  SmartDashboard.putNumber("amp", ampID);
+  SmartDashboard.putNumber("leftSource", leftSourceID);
+  SmartDashboard.putNumber("rightSource", rightSourceID);
+
+}
+
+
+
+public void basicMode(double secondDelay, double initTime, double positionX, double positionY, double yaw) {
+//System.out.println(":method ran");
+ //SmartDashboard.putNumber("testbotposeX", positionX);
+  
+
+  classTime = initTime - secondDelay;
+  allTime = classTime - startTime; 
+
+  if(allTime >= 0 && allTime < 1.5) { // Move backwards while intake is active
+    //autonomouStop.autoStopMethod();
+    m_frontLeft.set(-.4);
+    m_frontRight.set(-.4);
+    m_intake.set(-.6);
+
+    if(goOnToNextStep ==1){
+    goOnToNextStep--; // goOnToNextStep should now be at 0
+    System.out.println("Test 1, from 0-1s: " + goOnToNextStep);
+    }
+   
+  } else if (allTime >= 1.5 && allTime < 4) {// Once we passed the note line, everything should stop. 
+                                            //By this point we should have the note taken in, so we don't want the robot to keep on moving backwards.
+
+    if(teamAlliance.get() == Alliance.Blue){
+      if(ID != -1 && positionX< 1.6){// Some line before note line. 
+        //autonomouStop.autoStopMethod();//Will cause autonomousStop to stop checking before the note line.
+      }
+
+      m_frontLeft.set(-.3);
+      m_frontRight.set(-.3);
+      m_intake.set(-.6);
+      if ((ID != -1 && positionX >= 2) /*|| ID == -1 && ultraDistance < 12*/){//First condition uses botpose, second uses ultrasonic
+        m_frontLeft.set(0);//Just in case we can't see an ID and rely on botpose for stopping at note line.
+        m_frontRight.set(0);
+        m_intake.set(0);
+      }
+
+    } else if(teamAlliance.get() == Alliance.Red){
+
+      if(ID != -1 && positionX< 14.75){// Some line before note line. 
+        //autonomouStop.autoStopMethod();//Will cause autonomousStop to stop checking before the note line.
+      }
+
+      m_frontLeft.set(-.3);
+      m_frontRight.set(-.3);
+      m_intake.set(-.6);
+
+      if ((ID != -1 && positionX <= 14.35) /*|| ID == -1 && ultraDistance < 12*/){//First condition uses botpose, second uses ultrasonic
+        m_frontLeft.set(0);//Just in case we can't see an ID and rely on botpose for stopping at note line.
+        m_frontRight.set(0);
+        m_intake.set(0);
+      }
+    }
+   
+  } 
+
+}
+
+
+
+public void speakerMode(double secondDelay, double initTime, double positionX, double positionY, double yaw){
+
+  classTime = initTime - secondDelay;
+  allTime = classTime - startTime; 
+
+
+  if(allTime >=0 & allTime < 0.5){//Move backwards while intake is active.
+   // autonomouStop.autoStopMethod();
+    m_frontLeft.set(-.4);
+    m_frontRight.set(-.4);
+    m_intake.set(-.6);
+
+    if(goOnToNextStep ==1){
+    goOnToNextStep--; // goOnToNextStep should now be at 0
+    System.out.println("Test 1, from 0-1s: " + goOnToNextStep);
+    }
+  } else if ( allTime >= 0.5 && allTime < 3){//Move backwards but stop once note has been collected.
+    
+    if(teamAlliance.get() == Alliance.Blue){
+      if(ID != -1 && positionX> 1.6){// Some line before note line. 
+        //autonomouStop.autoStopMethod();//Will cause autonomousStop to stop checking before the note line.
+      }
+
+      m_frontLeft.set(-.3);
+      m_frontRight.set(-.3);
+      m_intake.set(-.6);
+      if ((ID != -1 && positionX >= 2) /*|| ID == -1 */|| ultraDistance < 24){//First condition uses botpose, second uses ultrasonic
+        m_frontLeft.set(0);//Just in case we can't see an ID and rely on botpose for stopping at note line.
+        m_frontRight.set(0);
+        m_intake.set(0);
+      }
+
+    } else if(teamAlliance.get() == Alliance.Red){
+
+      if(ID != -1 && positionX< 14.75){// Some line before note line. 
+       // autonomouStop.autoStopMethod();//Will cause autonomousStop to stop checking before the note line.
+      }
+
+      m_frontLeft.set(-.3);
+      m_frontRight.set(-.3);
+      m_intake.set(-.6);
+      if ((ID != -1 && positionX <= 14.35) /*|| ID == -1*/ || ultraDistance < 24){//First condition uses botpose, second uses ultrasonic
+        m_frontLeft.set(0);//Just in case we can't see an ID and rely on botpose for stopping at note line.
+        m_frontRight.set(0);
+        m_intake.set(0);
+      }
+    }
+
+  } else if (allTime >= 3 && allTime < 5){//Turn until we detect an apriltag ID.
+
+    if(teamAlliance.get() == Alliance.Blue && ID == -1){//If no ID is detected and we are blue
+      m_frontLeft.set(-0.4);//Theoretically spins left
+      m_frontRight.set(0.4);
+
+      if(goOnToNextStep==0){//Should only run once, despite the rest of this running constantly.
+        goOnToNextStep++;//Thus, goOnToNextStep should be equal to 1, not 891 or whatever.
+        System.out.println("Test 2, from 4-6s: " + goOnToNextStep);
+      }
+    } else if (teamAlliance.get() == Alliance.Blue && ID != -1){//if an ID is/becomes detected
+      m_frontLeft.set(0);//don't turn
+      m_frontRight.set(0);
+
+      if(goOnToNextStep==0){
+        goOnToNextStep++;
+        System.out.println("Test 2, from 4-6s: " + goOnToNextStep);
+      }
+
+    } else if (teamAlliance.get() == Alliance.Red && ID == -1){//If no ID is detected and we are red
+        m_frontLeft.set(0.4);//Theroetically spins right
+        m_frontRight.set(-0.4);
+
+      if (goOnToNextStep==0){
+        goOnToNextStep++;
+        System.out.println("Test 2, from 4-6s: " + goOnToNextStep);
+      }
+    } else if (teamAlliance.get() == Alliance.Red && ID != -1){//If an ID is detected
+      m_frontLeft.set(0);//don't turn
+      m_frontRight.set(0);
+      if(goOnToNextStep==0){
+        goOnToNextStep++;
+        System.out.println("Test 2, from 4-6s: " + goOnToNextStep);
+      }
+    } 
+
+  } else if (goOnToNextStep==1 && allTime >=5 && allTime< 5.5){//Capture start position variables.
+  //Should run only once
+
+    startYaw = yaw;//If this runs once, then these variables will be initialized once.
+    startY = positionY;//Therefore, these variables act like final variables without causing errors
+    startX = positionX;
+    goOnToNextStep--;
+
+    System.out.println("Test 3, from 6-6.5s: " + goOnToNextStep);
+    System.out.println(startYaw + " " + startY + " " + startX);
+  } else if (goOnToNextStep == 0 && allTime >=5 && allTime< 5.5){//Calculate how to get in front of the speaker
+
+
+
+  yawDisplacement = Math.toDegrees(Math.atan((finalPositionYCenter-startY)/(finalPositionXCenter-startX)));
+  if(yawDisplacement<0){
+    yawDisplacement *= -1;
+  }
+   System.out.println(yawDisplacement);
+  if(teamAlliance.get() == Alliance.Red){
+    if(positionY>finalPositionYCenter){
+      finalYaw = -1 * yawDisplacement;
+       System.out.println("==-displacement");
+    }else if(positionY<finalPositionYCenter){
+    finalYaw = yawDisplacement;
+     System.out.println("==displacement");
+    }
+  } else if (teamAlliance.get() == Alliance.Blue){
+    if(positionY<finalPositionYCenter){
+      finalYaw = 180-yawDisplacement;
+       System.out.println("==180-displacement");
+      }else if(positionY>finalPositionYCenter){
+      finalYaw = -180+yawDisplacement;
+       System.out.println("==-180+displacement");
+      }
+   }
+
+   System.out.println(finalYaw);
+  
+  } else if (allTime>=5.5 && allTime < 7){//Turn to speaker zone
+    
+    if(teamAlliance.get() == Alliance.Red){
+      if(yaw < finalYaw - 10 ){
+        m_frontLeft.set(-0.5);//Theoretically spins left
+        m_frontRight.set(0.5);
+      } else if(yaw > finalYaw + 10){
+        m_frontLeft.set(0.5);//Theoretically spins right
+        m_frontRight.set(-0.5);
+      } else if(yaw>finalYaw-10 && yaw<finalYaw+10){
+        m_frontLeft.set(0);
+        m_frontRight.set(0);
+      }
+    } else if (teamAlliance.get() == Alliance.Blue){
+
+      if(finalYaw<0){
+          if(yaw<0 && yaw<finalYaw-10 || yaw>0){
+            m_frontLeft.set(-0.5);//Spin left
+            m_frontRight.set(0.5);
+          } else if(yaw>finalYaw-10 && yaw<finalYaw+10){
+            m_frontLeft.set(0);//don't spin
+            m_frontRight.set(0);
+          } else {
+            m_frontLeft.set(0.5);//Spin right
+            m_frontRight.set(-0.5);
+          }
+
+      } else if(finalYaw>0){
+          if(yaw>0 && yaw>finalYaw+10 || yaw<0){
+            m_frontLeft.set(0.5);//Spin right
+            m_frontRight.set(-0.5);
+          } else if(yaw>finalYaw-10 && yaw<finalYaw+10){
+            m_frontLeft.set(0);//Don't spin
+            m_frontRight.set(0);
+          } else {
+            m_frontLeft.set(-0.5);//Spin left
+            m_frontRight.set(0.5);
+          }
+
+      }
+    }
+
+  } else if(allTime>= 7 && allTime < 10){//Move to the speaker zone
+    //autonomouStop.autoStopMethod();
+    if(teamAlliance.get() == Alliance.Blue){
+      if(positionX > finalPositionX2 || positionX< finalPositionX || positionY < finalPositionY || positionY > finalPositionY2){//If we are out of the shooter zone on any axis
+        m_frontLeft.set(0.3);
+        m_frontRight.set(0.3);
+      } else if(positionX <= finalPositionX2 && positionX >= finalPositionX && positionY <= finalPositionY && positionY < finalPositionY2){//If we are within the shooter zone
+        m_frontLeft.set(0);
+        m_frontRight.set(0);
+      }
+    } else if (teamAlliance.get() == Alliance.Red){
+      if(positionX < finalPositionX2 || positionX> finalPositionX || positionY < finalPositionY || positionY > finalPositionY2){//If we are out of the shooter zone on any axis
+        m_frontLeft.set(0.3);
+        m_frontRight.set(0.3);
+      } else if(positionX >= finalPositionX2 && positionX <= finalPositionX && positionY >= finalPositionY && positionY <= finalPositionY2){//If we are within the shooter zone for all axis
+        m_frontLeft.set(0);
+        m_frontRight.set(0);
+      }
+     }
+  } else if (allTime>=10 && allTime < 11){//Turn towards speaker
+
+    if(teamAlliance.get() == Alliance.Blue){//Blue speaker at 180
+      if(yaw<178 && yaw >=0){
+        m_frontLeft.set(0.4);//Theroetically spins right
+        m_frontRight.set(-0.4);
+      } else if (yaw >-178 && yaw < 0){
+        m_frontLeft.set(-0.4);//Theoretically spins left
+        m_frontRight.set(0.4);
+      }
+
+    } else if (teamAlliance.get() == Alliance.Red){//Red speaker at 0
+      if(yaw<-2 /*&& yaw >=-179.99999*/){
+        m_frontLeft.set(0.4);//Theroetically spins right
+        m_frontRight.set(-0.4);
+      } else if (yaw>2/*  && yaw <=180*/){
+        m_frontLeft.set(-0.4);//Theoretically spins left
+        m_frontRight.set(0.4);
+      }
+    }
+
+  } else if (allTime>=11 && allTime<12.5){//Shoot into speaker
+    m_frontLeft.set(0);
+    m_frontRight.set(0);
+    m_shooter1.set(.1);//Placeholder value
+    m_shooter2.set(.1);
+    m_intake.set(-.6);
+  } else if (allTime >= 12.5 && allTime <14){//Get out of the speaker zone (although might now be necessary)
+    m_frontLeft.set(-0.3);
+    m_frontRight.set(-0.3);
+    if(teamAlliance.get() == Alliance.Blue){
+      if(ID != -1 && positionX> 1.6){// Some line before note line. 
+       m_frontLeft.set(0);
+       m_frontRight.set(0);
+      }
+    } else if(teamAlliance.get() == Alliance.Red){
+
+      if(ID != -1 && positionX< 14.75){// Some line before note line. 
+        m_frontLeft.set(0);
+        m_frontRight.set(0);
+      }
+    }
+  } else if(allTime>=14 && allTime <=15){//Autonomous done
+    m_frontLeft.set(0);
+    m_frontRight.set(0);
+  }
+
+}
+
+public void doNothing(double secondDelay, double initTime, double positionX, double positionY, double yaw) {
+
+  classTime = initTime - secondDelay;
+  allTime = classTime - startTime; 
+if(allTime>=0 && allTime<15){
+  m_frontLeft.set(0);
+  m_frontRight.set(0);
+
+ SmartDashboard.putNumber("CurrentLeftMotorValue", m_frontLeft.get());
+ //autonomouStop.autoStopMethod();
+}
+}
+
+public void NXZ(double secondDelay, double initTime, double positionX, double positionY, double yaw){
+  classTime = initTime - secondDelay;
+  allTime = classTime - startTime; 
+
+  SmartDashboard.putNumber("Alltime", allTime);
+
+  if (goOnToNextStep==1 && allTime >=0 && allTime< 0.5){//Capture start position variables
+    System.out.println("Test 1, from 0s: " + goOnToNextStep);
+
+                    //Should run only once
+  startYaw = yaw;//If this runs once, then these variables will be initialized once.
+  startY = positionY;//Therefore, these variables act like final variables without causing errors
+  startX = positionX;
+  goOnToNextStep--;
+ 
+  System.out.println("Test 2, from 0-1.5s: " + goOnToNextStep);
+  System.out.println(startYaw + " " + startY + " " + startX);
+
+  } else if (goOnToNextStep == 0 && allTime >= 0.5 && allTime< 1){//Calculate how to get in front of the speaker
+
+  yawDisplacement = Math.toDegrees(Math.atan((finalPositionYCenter-startY)/(finalPositionXCenter-startX)));
+  if(yawDisplacement<0){
+    yawDisplacement *= -1;
+  }
+   System.out.println(yawDisplacement);
+  if(teamAlliance.get() == Alliance.Red){
+    if(positionY<finalPositionYCenter){
+      finalYaw = -1 * yawDisplacement;
+       System.out.println("==-displacement");
+    }else if(positionY>finalPositionYCenter){
+    finalYaw = yawDisplacement;
+     System.out.println("==displacement");
+    }
+  } else if (teamAlliance.get() == Alliance.Blue){
+    if(positionY<finalPositionYCenter){
+      finalYaw = 180-yawDisplacement;
+       System.out.println("==180-displacement");
+      }else if(positionY>finalPositionYCenter){
+      finalYaw = -180+yawDisplacement;
+       System.out.println("==-180+displacement");
+      }
+   }
+   System.out.println(finalYaw);
+
+  } else if (allTime>=1 && allTime < 5){//Turn to speaker zone
+    if(teamAlliance.get() == Alliance.Red){
+      if(yaw < finalYaw - 5 ){
+        m_frontLeft.set(0.5);//Theoretically spins right
+        m_frontRight.set(-0.5);
+      } else if(yaw > finalYaw + 5){
+        m_frontLeft.set(-0.5);//Theoretically spins left
+        m_frontRight.set(0.5);
+      } else if(yaw>finalYaw-5 && yaw<finalYaw+5){
+        m_frontLeft.set(0);
+        m_frontRight.set(0);
+      }
+    } else if (teamAlliance.get() == Alliance.Blue){
+
+      if(finalYaw<0){
+        if(yaw<0 && yaw<finalYaw-10 || yaw>0){
+          m_frontLeft.set(-0.5);
+          m_frontRight.set(0.5);
+        } else if(yaw>finalYaw-10 && yaw<finalYaw+10){
+           m_frontLeft.set(0);
+          m_frontRight.set(0);
+        } else {
+          m_frontLeft.set(0.5);
+          m_frontRight.set(-0.5);
+        }
+
+      } else if(finalYaw>0){
+        if(yaw>0 && yaw>finalYaw+10 || yaw<0){
+          m_frontLeft.set(0.5);
+          m_frontRight.set(-0.5);
+        } else if(yaw>finalYaw-10 && yaw<finalYaw+10){
+           m_frontLeft.set(0);
+          m_frontRight.set(0);
+        } else{
+          m_frontLeft.set(-0.5);
+          m_frontRight.set(0.5);
+        }
+
+      }
+    }
+  } 
+  else if(allTime>= 2 && allTime < 10){//Move to the speaker zone
+     System.out.println("done turning");  
+    if(teamAlliance.get() == Alliance.Blue){
+      if(positionX > finalPositionX2 || positionX< finalPositionX || positionY > finalPositionY || positionY < finalPositionY2){//If we are out of the shooter zone on any axis
+        m_frontLeft.set(0.3);
+        m_frontRight.set(.3);
+      } else if(positionX <= finalPositionX2 && positionX >= finalPositionX && positionY <= finalPositionY && positionY < finalPositionY2){//If we are within the shooter zone
+        m_frontLeft.set(0);
+        m_frontRight.set(0);
+      }
+    } else if (teamAlliance.get() == Alliance.Red){
+      if(positionX > finalPositionX2 || positionX< finalPositionX || positionY > finalPositionY || positionY < finalPositionY2){//If we are out of the shooter zone on any axis
+        m_frontLeft.set(0.3);
+        m_frontRight.set(.3);
+      } else if(positionX <= finalPositionX2 && positionX >= finalPositionX && positionY <= finalPositionY && positionY < finalPositionY2){//If we are within the shooter zone for all axis
+        m_frontLeft.set(0);
+        m_frontRight.set(0);
+      }
+     }
+    } /*
+    else if (allTime>=5 && allTime < 6){//Turn towards speaker
+
+
+    if(teamAlliance.get() == Alliance.Blue){//Blue speaker at 180
+      if(yaw<178 && yaw >=0){
+        m_frontLeft.set(0.3);//Theroetically spins right
+        m_frontRight.set(-0.3);
+      } else if (yaw >-178 && yaw < 0){
+        m_frontLeft.set(-0.3);//Theoretically spins left
+        m_frontRight.set(0.3);
+      }
+    } else if (teamAlliance.get() == Alliance.Red){//Red speaker at 0
+      if(yaw<-2 && yaw >=-179.99999){
+        m_frontLeft.set(0.3);//Theroetically spins right
+        m_frontRight.set(-0.3);
+      } else if (yaw>2 && yaw <=180){
+        m_frontLeft.set(-0.3);//Theoretically spins left
+        m_frontRight.set(0.3);
+      }
+    }
+    
+  }/* 
+  else if (allTime>=6 && allTime<7.5){//Shoot into speaker
+    m_frontLeft.set(0);
+    m_frontRight.set(0);
+    m_shooter1.set(.1);//Placeholder value
+    m_shooter2.set(.1);
+  } else if (allTime >= 7.5 && allTime <9){//Get out of the speaker zone (although might now be necessary)
+    m_frontLeft.set(-.3);
+    m_frontRight.set(-.15);
+  } else if(allTime>=9){//Autonomous done
+    m_frontLeft.set(0);
+    m_frontRight.set(0);
+  }
+
+*/
+  }
+
+
+
+
+
+//time related variables
+double classTime;
+double allTime;
+
+//autoStop object
+autoStop autonomouStop = new autoStop();
+
+//botpose variables
+double positionX;//These variables are not the same variables declared in the robot class
+double positionY;//The robot class variables have a private keyword, so this class can't access them
+double positionZ;//Therefore, we create autoBot versions of the variables here
+
+
+double finalPositionX;
+double finalPositionY;
+
+double finalPositionX2;
+double finalPositionY2;
+
+double finalPositionXCenter;
+double finalPositionYCenter;
+
+double startX;
+double startY;
+ 
+
+//Yaw variables
+double yaw;
+double yawDisplacement;
+double finalYaw;
+
+
+double startYaw;
+
+//Some sort of checkpoint value for autonomous, 0 is not ready, 1 is ready.
+int goOnToNextStep = 1;
+}
+
+
+class autoStop{
+  public autoStop(){
+  //Probably should be an empty constructor
+  }
+
+  public void autoStopMethod(){ 
+  //Method, don't treat it as a entirely seperate autonomous mode like the ones above.
+  //This method is activated during steps of autonomous programs
+                       
+
+  //Gets the speed of the motors at the time of something entering the ultrasonic sensor range
+  currentLeftSpeed = m_frontLeft.get();
+  currentRightSpeed = m_frontRight.get();
+
+  System.out.println("Last speed before autostop ran: " + currentLeftSpeed + " " + currentRightSpeed);
+  System.out.println("Ultradistance and min distance: " + ultraDistance + " " + minDistance);
+  while (ultraDistance <= minDistance){//In theory, this do while loop will make it so that the current variables aren't constantly updated
+    //This will prevent the motor speeds from going from positive to negative to positive and so on.
+    if(currentLeftSpeed < 0 && currentRightSpeed < 0){//This if else statements essentially cause the robot to back up from whatever is in the detection range.
+      m_frontLeft.set(.4);
+      m_frontRight.set(.3);
+      System.out.println("autoStop ran: go forwards");
+    } else if(currentLeftSpeed>0 && currentRightSpeed > 0){
+      m_frontLeft.set(-.4);
+      m_frontRight.set(-.3);
+      System.out.println("autoStop ran: go backwards");
+    } else if(currentLeftSpeed==0 && currentRightSpeed == 0){
+      m_frontLeft.set(0);
+      m_frontRight.set(0);
+      System.out.println("autoStop ran: stopped");
+    }
+  }//It will do so until it is out of the range and safe to return to autonomous.
+  if(ultraDistance > minDistance)
+  System.out.println("autoStop: Robot left ultrasensor range");
+  }
+  //AutoStop variables
+  public double currentLeftSpeed;
+  public double currentRightSpeed;
+}
+
+class yValue{
+  public yValue(double y){
+    yCal = y;
+  }
+  public double yJoy(){
+    if((yCal <= 0.3) && (yCal >= 0.0)){
+      return 0.0;
+    }
+    else if(yCal > 0.3){
+      return -yCal;
+    }
+    else if((yCal >= -0.3) && (yCal <= 0.0)){
+      return 0.0;
+    }
+    else if(yCal < -0.3){
+      return -yCal;
+    }
+    else{
+      return 0.0;
+    }
+  }
+  public double yCal;
+}
+
+class xValue{
+  public xValue(double x){
+    xCal = x;
+  }
+ public double xJoy(){
+  if((xCal <= 0.3) && (xCal >= 0.0)){
+    return 0.0;
+  }
+  else if(xCal > 0.3){
+    return xCal;
+  }
+  else if((xCal >= -0.3) && (xCal <= 0.0)){
+    return 0.0;
+  }
+  else if(xCal < -0.3){
+    return xCal;
+  }
+  else{
+    return 0.0;
+  }
+ }
+public double xCal;
+}
+
+class zValue{
+  public zValue(double z){
+    zCal = z;
+  }
+public double zJoy(){
+  if((zCal <= 0.3) && (zCal >= 0.0)){
+    return 0.0;
+  }
+  else if(zCal > 0.3){
+    return (zCal * -0.65);
+  }
+  else if((zCal >= -0.3) && (zCal <= 0.0)){
+    return 0.0;
+  }
+  else if(zCal < -0.3){
+    return (zCal * -0.65);
+  }
+  else{
+    return 0.0;
+  }
+}
+
+public double zCal;
+}
+
+class wValue{
+  public wValue(double w){
+    wCal = w;
+  }
+  public double wSlide(){
+    return (-wCal+1)/2;
+
+  }
+  public double wCal;
+
+}
+
+class Fricker{
+
+  public Fricker(double f){
+    fCal = f;
+  }
+  public double fThot(){
+    if((fCal <= 0.4)&& (fCal >= 0.0)){
+      return 0.0;
+    }
+    else if (fCal > 0.4){
+      return -fCal;
+    }
+    else if((fCal >= -0.4) && (fCal <= 0.0)){
+      return 0.0;
+    }
+    else if(fCal < -0.4){
+      return -fCal;
+    }
+    else{
+      return 0.0;
+    }
+  }
+  public double fCal;
+}
+}
